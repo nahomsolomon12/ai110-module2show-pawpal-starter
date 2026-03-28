@@ -5,8 +5,14 @@
 **a. Initial design**
 
 - Briefly describe your initial UML design.
+ Pet → Task (1 to many)
+A pet has multiple care tasks (feed, walk, meds, grooming)
+Scheduler → Task (uses)
+Scheduler takes tasks and organizes them
+Scheduler → OwnerPreferences (depends on)
+Scheduler respects constraints when building plans
 - What classes did you include, and what responsibilities did you assign to each?
-
+Pet: responsibilities - houses name species and age of each pet the end user wants to track, Tasks: responsibilities: name of task, duration, frequency and priorotization to work along with the schedule, Schedule: responsibilities - generates the order in which tasks are organized and outputs a plan, and Owner Preferences: responsibilities - provides constraints on the schedule class based on availablity of hours.
 **b. Design changes**
 
 - Did your design change during implementation?
