@@ -200,12 +200,14 @@ class Schedule:
         self._excluded: list[dict] = []
         self._minutes_used: int = 0
         self._generated: bool = False
+        self._warnings: list[str] = []
 
     def generate(self) -> None:
         """Build the schedule. Must be called before plan(), excluded(), or summary()."""
         self._plan = []
         self._excluded = []
         self._minutes_used = 0
+        self._warnings = []
 
         available = self.owner.available_minutes()
         daily = [t for t in self.pet.pending_tasks() if t.frequency == "daily"]
@@ -215,10 +217,14 @@ class Schedule:
 
         for task in sorted_daily:
             if self._minutes_used + task.duration_minutes <= available:
+                start = self._minutes_used
+                end   = start + task.duration_minutes
                 self._plan.append({
                     "task": task.name,
                     "duration_minutes": task.duration_minutes,
                     "priority": task.priority,
+                    "start_min": start,
+                    "end_min": end,
                     "reason": (
                         f"Scheduled — {task.priority} priority, "
                         f"fits within available time."
@@ -244,6 +250,18 @@ class Schedule:
                 "priority": task.priority,
                 "reason": "Deferred — weekly task, not scheduled today.",
             })
+
+        if not self._plan:
+            self._warnings.append(
+                f"WARNING: No tasks could be scheduled for {self.pet.name}. "
+                f"All daily tasks may exceed the available {available} min."
+            )
+        elif len(self._excluded) > len(weekly):
+            skipped_count = len(self._excluded) - len(weekly)
+            self._warnings.append(
+                f"WARNING: {skipped_count} task(s) for {self.pet.name} were skipped "
+                f"due to insufficient time. Consider increasing available hours."
+            )
 
         self._generated = True
 
@@ -290,4 +308,51 @@ class Schedule:
                     f"  - {entry['task']} ({entry['duration_minutes']} min): {entry['reason']}"
                 )
 
+        if self._warnings:
+            lines += ["", "=== Warnings ==="]
+            for w in self._warnings:
+                lines.append(f"  ! {w}")
+
         return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Lightweight conflict detection
+# ---------------------------------------------------------------------------
+
+def conflict_warnings(schedules: list[Schedule]) -> list[str]:
+    """Return plain-English warning strings for any time-window overlaps across schedules.
+
+    Two tasks conflict when their windows intersect:
+        A.start_min < B.end_min  AND  B.start_min < A.end_min
+
+    This is intentionally lightweight — it never raises an exception. If the
+    input is empty or all schedules have no planned tasks, it returns [].
+
+    Args:
+        schedules: Any list of Schedule objects (generated or not).
+
+    Returns:
+        A list of human-readable warning strings. Empty list means no conflicts.
+    """
+    if not schedules:
+        return []
+
+    all_entries: list[tuple[str, dict]] = []
+    for sched in schedules:
+        if not sched._generated:
+            sched.generate()
+        for entry in sched._plan:
+            all_entries.append((sched.pet.name, entry))
+
+    warnings = []
+    for i in range(len(all_entries)):
+        for j in range(i + 1, len(all_entries)):
+            pet_a, a = all_entries[i]
+            pet_b, b = all_entries[j]
+            if a["start_min"] < b["end_min"] and b["start_min"] < a["end_min"]:
+                warnings.append(
+                    f"WARNING: [{pet_a}] '{a['task']}' (min {a['start_min']}-{a['end_min']}) "
+                    f"overlaps [{pet_b}] '{b['task']}' (min {b['start_min']}-{b['end_min']})"
+                )
+    return warnings

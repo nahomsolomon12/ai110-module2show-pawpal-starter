@@ -1,4 +1,4 @@
-from pawpal_system import Owner, Pet, Task, Schedule
+from pawpal_system import Owner, Pet, Task, Schedule, conflict_warnings
 
 # --- Owner ---
 jordan = Owner(name="Jordan", available_hours=2)
@@ -114,3 +114,35 @@ mochi_sorted_daily = sorted(
 print("  Mochi daily tasks (high->low priority, shortest first on ties):")
 for t in mochi_sorted_daily:
     print(f"    {t}")
+
+# --- Demo: detect_overlaps across all pet schedules ---
+print()
+print("=" * 55)
+print("         OVERLAP DETECTION DEMO")
+print("=" * 55)
+
+# Reset so all tasks are pending before building fresh schedules
+for t in mochi.tasks + luna.tasks:
+    t.reset()
+
+mochi_schedule = Schedule(owner=jordan, pet=mochi)
+luna_schedule  = Schedule(owner=jordan, pet=luna)
+mochi_schedule.generate()
+luna_schedule.generate()
+
+print("\n-- Mochi scheduled windows --")
+for entry in mochi_schedule.plan():
+    print(f"  {entry['task']:20s}  min {entry['start_min']:>3}-{entry['end_min']:>3}")
+
+print("\n-- Luna scheduled windows --")
+for entry in luna_schedule.plan():
+    print(f"  {entry['task']:20s}  min {entry['start_min']:>3}-{entry['end_min']:>3}")
+
+warnings = conflict_warnings([mochi_schedule, luna_schedule])
+print()
+if warnings:
+    print(f"  {len(warnings)} conflict(s) found:")
+    for w in warnings:
+        print(f"  {w}")
+else:
+    print("  No conflicts found between schedules.")
