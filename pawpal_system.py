@@ -2,7 +2,8 @@
 PawPal+ backend — full implementation of four core classes.
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+from datetime import date, timedelta
 from typing import Literal
 
 PRIORITY_RANK = {"high": 3, "medium": 2, "low": 1}
@@ -20,6 +21,7 @@ class Task:
     frequency: Literal["daily", "weekly"]
     priority: Literal["low", "medium", "high"]
     completed: bool = False
+    due_date: date = field(default_factory=date.today)
 
     def mark_complete(self) -> None:
         """Mark this task as done for the current period."""
@@ -29,12 +31,22 @@ class Task:
         """Reset completion status for a new scheduling period."""
         self.completed = False
 
+    def reschedule(self) -> "Task":
+        """Return a fresh copy of this task reset for its next occurrence.
+
+        Due date is advanced by 1 day for daily tasks, 7 days for weekly tasks,
+        calculated from the current due_date using timedelta.
+        """
+        interval = timedelta(days=1 if self.frequency == "daily" else 7)
+        return replace(self, completed=False, due_date=self.due_date + interval)
+
     def __str__(self) -> str:
         """Return a readable string showing task name, time, frequency, priority, and status."""
         status = "done" if self.completed else "pending"
         return (
             f"{self.name} ({self.duration_minutes} min | "
-            f"{self.frequency} | {self.priority} priority | {status})"
+            f"{self.frequency} | {self.priority} priority | "
+            f"due {self.due_date} | {status})"
         )
 
 
@@ -61,6 +73,23 @@ class Pet:
     def pending_tasks(self) -> list[Task]:
         """Return only tasks not yet marked complete."""
         return [t for t in self.tasks if not t.completed]
+
+    def complete_task(self, name: str) -> Task:
+        """Mark a pending task complete and append a fresh copy for its next occurrence.
+
+        For daily tasks the new instance is ready for tomorrow;
+        for weekly tasks it is ready for next week.
+
+        Returns the newly queued Task instance.
+        Raises ValueError if no pending task with that name exists.
+        """
+        for task in self.tasks:
+            if task.name == name and not task.completed:
+                task.mark_complete()
+                next_task = task.reschedule()
+                self.tasks.append(next_task)
+                return next_task
+        raise ValueError(f"No pending task '{name}' found for {self.name}")
 
     def __str__(self) -> str:
         """Return a readable string showing pet name, species, age, and task count."""
@@ -105,6 +134,36 @@ class Owner:
         """Return all tasks grouped by pet name across every owned pet."""
         return {pet.name: pet.tasks for pet in self.pets}
 
+    def filter_tasks(
+        self,
+        completed: bool | None = None,
+        pet_name: str | None = None,
+    ) -> dict[str, list[Task]]:
+        """Return tasks filtered by completion status, pet name, or both.
+
+        Args:
+            completed: If True, return only completed tasks. If False, return
+                       only pending tasks. If None, include both.
+            pet_name:  If provided, return tasks for that pet only.
+                       If None, include all pets.
+
+        Returns:
+            A dict mapping pet name → filtered task list. Pets with no
+            matching tasks are omitted from the result.
+        """
+        pets = self.pets
+        if pet_name is not None:
+            pets = [p for p in pets if p.name == pet_name]
+
+        result = {}
+        for pet in pets:
+            tasks = pet.tasks
+            if completed is not None:
+                tasks = [t for t in tasks if t.completed == completed]
+            if tasks:
+                result[pet.name] = tasks
+        return result
+
     def __str__(self) -> str:
         """Return a readable string showing owner name, available hours, and pet count."""
         return (
@@ -126,7 +185,7 @@ class Schedule:
 
     Algorithm:
       1. Pull pending daily tasks from the pet; note weekly tasks as deferred.
-      2. Sort daily tasks by priority (high → medium → low).
+      2. Sort daily tasks by priority (high → medium → low), then by duration (shortest first) as a tiebreaker.
       3. Greedily add tasks until the owner's available minutes are used up.
       4. Store results internally; expose via plan(), excluded(), summary().
     """
@@ -152,7 +211,7 @@ class Schedule:
         daily = [t for t in self.pet.pending_tasks() if t.frequency == "daily"]
         weekly = [t for t in self.pet.pending_tasks() if t.frequency == "weekly"]
 
-        sorted_daily = sorted(daily, key=lambda t: PRIORITY_RANK[t.priority], reverse=True)
+        sorted_daily = sorted(daily, key=lambda t: (-PRIORITY_RANK[t.priority], t.duration_minutes))
 
         for task in sorted_daily:
             if self._minutes_used + task.duration_minutes <= available:
