@@ -74,3 +74,28 @@ pip install -r requirements.txt
 5. Add tests to verify key behaviors.
 6. Connect your logic to the Streamlit UI in `app.py`.
 7. Refine UML so it matches what you actually built.
+
+
+### Testing PawPal+
+
+Run the full test suite from the project root:
+
+```bash
+python -m pytest tests/test_pawpal.py -v
+```
+
+**What the tests cover (16 tests total)**
+
+*Sorting (4 tests)* — verifies that tasks added in any order are scheduled high-priority first, that duration breaks ties between same-priority tasks (shortest first), that each task's `start_min` equals the previous task's `end_min` with no gaps or overlaps, and that a task longer than the full available window lands in `excluded()` rather than `plan()`.
+
+*Recurrence (6 tests)* — confirms that `complete_task()` marks the original instance done and appends a fresh pending copy, that daily tasks advance `due_date` by exactly 1 day and weekly tasks by exactly 7 days via `timedelta`, that the rescheduled copy is picked up by the next `generate()` call, and that calling `complete_task()` when no pending instance exists raises `ValueError`.
+
+*Conflict detection (4 tests)* — checks that `conflict_warnings()` flags cross-pet time-window overlaps with readable warning strings, returns `[]` for a single schedule, never raises on empty input, and does not flag back-to-back tasks that share an endpoint but do not truly overlap.
+
+**Notable failure caught during testing**
+
+`test_complete_task_raises_if_already_completed` initially failed because the test called `complete_task()` twice, expecting the second call to raise — but `complete_task()` always creates a new pending copy on the first call, so the second call found that copy and succeeded. The fix was to use `task.mark_complete()` directly to set up the completed state without creating a rescheduled instance. This revealed a real behavioral distinction: `mark_complete()` and `complete_task()` are not interchangeable.
+
+**Confidence level: ★★★★☆ (4 / 5)**
+
+The happy path is well-covered — sorting, recurrence, and conflict detection all behave correctly and all 16 tests pass. One star is withheld because the multi-pet shared time budget (each pet currently receives the full available window independently) is a known gap with no test coverage, and no tests currently exercise month-boundary date rollovers or a pet with zero tasks.
