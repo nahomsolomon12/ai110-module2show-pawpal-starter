@@ -1,57 +1,49 @@
-# PawPal+ (Module 2 Project)
+# PawPal+
 
-You are building **PawPal+**, a Streamlit app that helps a pet owner plan care tasks for their pet.
+A Streamlit app that helps pet owners build a daily care schedule across multiple pets — prioritizing tasks, detecting time conflicts, and automatically rescheduling recurring care.
 
-## Scenario
+---
 
-A busy pet owner needs help staying consistent with pet care. They want an assistant that can:
+## 📸 Demo
 
-- Track pet care tasks (walks, feeding, meds, enrichment, grooming, etc.)
-- Consider constraints (time available, priority, owner preferences)
-- Produce a daily plan and explain why it chose that plan
 
-Your job is to design the system first (UML), then implement the logic in Python, then connect it to the Streamlit UI.
+![PawPal+ App Screenshot](demo.png)
 
-## What you will build
+---
 
-Your final app should:
+## Features
 
-- Let a user enter basic owner + pet info
-- Let a user add/edit tasks (duration + priority at minimum)
-- Generate a daily schedule/plan based on constraints and priorities
-- Display the plan clearly (and ideally explain the reasoning)
-- Include tests for the most important scheduling behaviors
+### Priority-based scheduling with duration tiebreaking
+The scheduler sorts daily tasks by priority (high → medium → low) and uses duration as a tiebreaker when two tasks share the same priority — placing the shorter task first. This greedy approach maximizes the number of tasks that fit within the owner's available time window.
 
-## Smarter Scheduling
+### Sorting by time window
+Every scheduled task is assigned a `start_min` and `end_min` based on when it would run in sequence. The UI displays these time windows in a structured table so the owner sees exactly when each task would occur.
 
-Three enhancements were added to `pawpal_system.py` to make the scheduler more useful and reliable.
+### Task filtering by status or pet
+Tasks can be filtered by completion status, pet name, or both via `Owner.filter_tasks()`. Pending-only, completed-only, one-pet-only, or any combination — pets with no matching tasks are omitted from the result automatically.
 
-### Sort by priority and duration
+### Daily and weekly recurrence
+Marking a task complete via `Pet.complete_task()` automatically creates a new pending instance with a `due_date` advanced by the correct interval — 1 day for daily tasks, 7 days for weekly tasks — calculated using Python's `timedelta`. The original completed instance is preserved in history.
 
-`Schedule.generate()` now sorts daily tasks by priority first (high → medium → low), then by duration as a tiebreaker — shortest task first when two tasks share the same priority. This maximizes the number of tasks that fit within the owner's available time window, rather than stopping early because a long task blocked a short one.
+### Conflict warnings
+`conflict_warnings()` compares time windows across all pet schedules and returns plain-English warning messages for any overlaps. Because each pet's schedule starts from minute 0, an owner with multiple pets can be double-booked — the app surfaces these as `st.error()` banners so they are impossible to miss.
 
-### Filter tasks by status or pet
+### Per-schedule warnings
+Each schedule tracks its own warnings during generation. If no tasks can be scheduled (all tasks exceed the time budget) or tasks are skipped due to insufficient time, a `st.warning()` banner appears automatically below that pet's schedule.
 
-`Owner.filter_tasks(completed, pet_name)` returns tasks filtered by completion status, pet name, or both. All parameters are optional, so any combination works:
+---
 
-```python
-owner.filter_tasks(completed=False)              # all pending tasks across every pet
-owner.filter_tasks(completed=True)               # all completed tasks
-owner.filter_tasks(pet_name="Mochi")             # all tasks for one pet
-owner.filter_tasks(completed=False, pet_name="Mochi")  # pending tasks for one pet
-```
-
-Pets with no matching tasks are omitted from the result.
-
-### Lightweight conflict detection
-
-`conflict_warnings(schedules)` checks all scheduled task pairs across multiple schedules for time-window overlaps and returns a plain list of warning strings — it never raises an exception. Because each pet's schedule independently starts from minute 0, an owner with multiple pets can be double-booked if both schedules are treated as running concurrently. The function surfaces those conflicts as readable messages:
+## Project structure
 
 ```
-WARNING: [Mochi] 'Feeding' (min 0-10) overlaps [Luna] 'Feeding' (min 0-10)
+pawpal_system.py   — Core classes: Task, Pet, Owner, Schedule, conflict_warnings()
+app.py             — Streamlit UI
+main.py            — Terminal demo: sorting, filtering, rescheduling, conflict detection
+tests/
+  test_pawpal.py   — 16 pytest tests covering sorting, recurrence, and conflict detection
+uml_diagram.md     — Final UML class diagram (updated to match implemented code)
+reflection.md      — Design decisions, tradeoffs, and AI collaboration notes
 ```
-
-Each `Schedule` also tracks its own `_warnings` list, populated during `generate()` when no tasks could be scheduled or tasks were skipped due to time constraints. These warnings appear automatically at the bottom of `schedule.summary()`.
 
 ---
 
@@ -61,41 +53,79 @@ Each `Schedule` also tracks its own `_warnings` list, populated during `generate
 
 ```bash
 python -m venv .venv
-source .venv/bin/activate  # Windows: .venv\Scripts\activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### Suggested workflow
+### Run the app
 
-1. Read the scenario carefully and identify requirements and edge cases.
-2. Draft a UML diagram (classes, attributes, methods, relationships).
-3. Convert UML into Python class stubs (no logic yet).
-4. Implement scheduling logic in small increments.
-5. Add tests to verify key behaviors.
-6. Connect your logic to the Streamlit UI in `app.py`.
-7. Refine UML so it matches what you actually built.
+```bash
+streamlit run app.py
+```
 
+### Run the terminal demo
 
-### Testing PawPal+
+```bash
+python main.py
+```
 
-Run the full test suite from the project root:
+### Run the tests
 
 ```bash
 python -m pytest tests/test_pawpal.py -v
 ```
 
-**What the tests cover (16 tests total)**
+---
 
-*Sorting (4 tests)* — verifies that tasks added in any order are scheduled high-priority first, that duration breaks ties between same-priority tasks (shortest first), that each task's `start_min` equals the previous task's `end_min` with no gaps or overlaps, and that a task longer than the full available window lands in `excluded()` rather than `plan()`.
+## How to use the app
 
-*Recurrence (6 tests)* — confirms that `complete_task()` marks the original instance done and appends a fresh pending copy, that daily tasks advance `due_date` by exactly 1 day and weekly tasks by exactly 7 days via `timedelta`, that the rescheduled copy is picked up by the next `generate()` call, and that calling `complete_task()` when no pending instance exists raises `ValueError`.
+1. **Owner Setup** — enter your name and how many hours you have available today.
+2. **Add a Pet** — add one or more pets. Each pet tracks its own task list.
+3. **Add a Task** — select a pet, then add tasks with a name, duration, frequency (daily/weekly), and priority. The task table always displays sorted by priority (high → low) with colored badges.
+4. **Generate Schedule** — click to build today's plan. For each pet you will see:
+   - Metrics showing available, scheduled, and remaining minutes
+   - A table of scheduled tasks with their time windows
+   - A collapsible panel of skipped or deferred tasks with reasons
+   - Any per-pet warnings (e.g. time budget exceeded)
+   - Cross-pet conflict warnings if the owner would be double-booked
 
-*Conflict detection (4 tests)* — checks that `conflict_warnings()` flags cross-pet time-window overlaps with readable warning strings, returns `[]` for a single schedule, never raises on empty input, and does not flag back-to-back tasks that share an endpoint but do not truly overlap.
+---
+
+## Scheduling algorithm
+
+```
+1. Pull all pending daily tasks for the pet.
+2. Sort by priority (high → medium → low), then by duration ascending as a tiebreaker.
+3. Greedily assign each task a start_min and end_min, stopping when the time budget is used.
+4. Defer all weekly tasks to the excluded list.
+5. Emit per-schedule warnings if tasks were skipped or nothing could be scheduled.
+6. After all pets are scheduled, run conflict_warnings() across all schedules.
+```
+
+---
+
+## Testing
+
+**16 tests — all passing**
+
+| Group | Tests | What is verified |
+|---|---|---|
+| Sorting | 4 | Priority order, duration tiebreaker, chronological time windows, budget overflow |
+| Recurrence | 6 | Completion creates new instance, daily +1 day, weekly +7 days, `ValueError` on no pending match, rescheduled copy appears in next `generate()` |
+| Conflict detection | 4 | Overlaps detected, single schedule returns `[]`, empty input returns `[]`, back-to-back tasks not flagged |
 
 **Notable failure caught during testing**
 
-`test_complete_task_raises_if_already_completed` initially failed because the test called `complete_task()` twice, expecting the second call to raise — but `complete_task()` always creates a new pending copy on the first call, so the second call found that copy and succeeded. The fix was to use `task.mark_complete()` directly to set up the completed state without creating a rescheduled instance. This revealed a real behavioral distinction: `mark_complete()` and `complete_task()` are not interchangeable.
+`test_complete_task_raises_if_already_completed` initially failed because calling `complete_task()` twice succeeded — the first call creates a new pending copy, so the second call finds it. The fix was to use `task.mark_complete()` directly to produce a completed state without a rescheduled copy. This revealed that `mark_complete()` and `complete_task()` are not interchangeable.
 
 **Confidence level: ★★★★☆ (4 / 5)**
 
-The happy path is well-covered — sorting, recurrence, and conflict detection all behave correctly and all 16 tests pass. One star is withheld because the multi-pet shared time budget (each pet currently receives the full available window independently) is a known gap with no test coverage, and no tests currently exercise month-boundary date rollovers or a pet with zero tasks.
+Happy path is well-covered. Known gaps: multi-pet shared time budget is untested (each pet currently receives the full window independently), and no tests exercise month-boundary date rollovers.
+
+---
+
+## Design notes
+
+The full design history — UML changes, tradeoffs, AI collaboration, and reflection — is documented in [reflection.md](reflection.md). The final class diagram is in [uml_diagram.md](uml_diagram.md).
+
+**Key architectural decision:** tasks live on `Pet`, not on `Schedule`. The scheduler reads `pet.pending_tasks()` at generation time rather than holding its own copy. This means completing a task and rescheduling it is always reflected in the next `generate()` call without any extra wiring.

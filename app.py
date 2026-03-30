@@ -1,4 +1,4 @@
-from pawpal_system import Owner, Pet, Task, Schedule
+from pawpal_system import Owner, Pet, Task, Schedule, conflict_warnings
 
 import streamlit as st
 
@@ -48,7 +48,11 @@ if st.session_state.owner:
         st.success(f"Added: {new_pet}")
 
     if st.session_state.owner.pets:
-        st.write("**Current pets:**", [str(p) for p in st.session_state.owner.pets])
+        st.write("**Current pets:**")
+        st.table([
+            {"Name": p.name, "Species": p.species, "Age": p.age, "Tasks": len(p.tasks)}
+            for p in st.session_state.owner.pets
+        ])
 
 # ---------------------------------------------------------------------------
 # Section 3: Add a Task to a Pet
@@ -84,16 +88,19 @@ if st.session_state.owner and st.session_state.owner.pets:
         st.success(f"Task added to {target_pet.name}: {new_task}")
 
     if target_pet.tasks:
-        st.write(f"**Tasks for {target_pet.name}:**")
+        st.write(f"**Tasks for {target_pet.name}** (sorted by priority):")
+        # Use get_tasks_by_priority() so the table always shows high → low
+        PRIORITY_BADGE = {"high": "🔴 high", "medium": "🟡 medium", "low": "🟢 low"}
         st.table([
             {
-                "Task":     t.name,
-                "Duration": f"{t.duration_minutes} min",
+                "Task":      t.name,
+                "Duration":  f"{t.duration_minutes} min",
                 "Frequency": t.frequency,
-                "Priority": t.priority,
-                "Done":     t.completed,
+                "Priority":  PRIORITY_BADGE[t.priority],
+                "Due":       str(t.due_date),
+                "Done":      "✓" if t.completed else "—",
             }
-            for t in target_pet.tasks
+            for t in target_pet.get_tasks_by_priority()
         ])
 
 # ---------------------------------------------------------------------------
@@ -104,10 +111,73 @@ if st.session_state.owner and st.session_state.owner.pets:
     st.header("Today's Schedule")
 
     if st.button("Generate Schedule"):
+        schedules = []
+
         for pet in st.session_state.owner.pets:
             if not pet.tasks:
                 st.info(f"{pet.name} has no tasks yet.")
                 continue
+
             schedule = Schedule(owner=st.session_state.owner, pet=pet)
+            schedule.generate()
+            schedules.append(schedule)
+
             st.subheader(f"{pet.name}")
-            st.text(schedule.summary())
+
+            # --- At-a-glance metrics ---
+            available = st.session_state.owner.available_minutes()
+            used      = schedule._minutes_used
+            col_a, col_b, col_c = st.columns(3)
+            col_a.metric("Available", f"{available} min")
+            col_b.metric("Scheduled", f"{used} min")
+            col_c.metric("Remaining", f"{available - used} min")
+
+            # --- Scheduled tasks table with time windows ---
+            if schedule.plan():
+                st.write("**Scheduled tasks**")
+                st.table([
+                    {
+                        "Task":     entry["task"],
+                        "Priority": entry["priority"],
+                        "Duration": f"{entry['duration_minutes']} min",
+                        "Window":   f"min {entry['start_min']}–{entry['end_min']}",
+                        "Reason":   entry["reason"],
+                    }
+                    for entry in schedule.plan()
+                ])
+            else:
+                st.warning(f"No tasks could be scheduled for {pet.name}.")
+
+            # --- Excluded / deferred tasks ---
+            if schedule.excluded():
+                with st.expander("Not scheduled"):
+                    st.table([
+                        {
+                            "Task":     entry["task"],
+                            "Priority": entry["priority"],
+                            "Duration": f"{entry['duration_minutes']} min",
+                            "Reason":   entry["reason"],
+                        }
+                        for entry in schedule.excluded()
+                    ])
+
+            # --- Per-pet schedule warnings ---
+            if schedule._warnings:
+                for w in schedule._warnings:
+                    st.warning(w)
+
+        # --- Cross-pet conflict warnings ---
+        if len(schedules) > 1:
+            warnings = conflict_warnings(schedules)
+            if warnings:
+                st.divider()
+                st.subheader("Scheduling Conflicts")
+                st.caption(
+                    "These tasks overlap in time. Because each pet's schedule starts "
+                    "from minute 0, the owner would be double-booked during these windows."
+                )
+                for w in warnings:
+                    st.error(w)
+            else:
+                st.divider()
+                st.success("No scheduling conflicts detected across all pets.")
